@@ -1,69 +1,92 @@
-import Image from "next/image";
+import Link from "next/link";
+import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { Plus } from "lucide-react";
+import { AppHeader } from "@/components/app-header";
+import { TrackerCard } from "@/components/trackers/tracker-card";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { db } from "@/db";
+import { doseLogs, trackers } from "@/db/schema";
+import { requireUser } from "@/lib/auth";
+import { requireProfile } from "@/lib/profile";
+import { addDays, formatDayHeading, todayIn } from "@/lib/dates";
+import { getTimeZone } from "@/lib/timezone";
 
-export default function Home() {
+// Janela do gráfico (53 semanas) + folga; a sequência também é calculada dentro dela.
+const HISTORY_DAYS = 380;
+
+export default async function Home() {
+  const user = await requireUser();
+  await requireProfile(user.id);
+  const today = todayIn(await getTimeZone());
+
+  const [items, logs] = await Promise.all([
+    db
+      .select()
+      .from(trackers)
+      .where(eq(trackers.userId, user.id))
+      .orderBy(desc(sql`${trackers.kind} = 'water'`), asc(trackers.createdAt)),
+    db
+      .select({ trackerId: doseLogs.trackerId, date: doseLogs.date, doseIndex: doseLogs.doseIndex })
+      .from(doseLogs)
+      .where(and(eq(doseLogs.userId, user.id), gte(doseLogs.date, addDays(today, -HISTORY_DAYS)))),
+  ]);
+
+  const dosesByTracker = new Map<string, Map<string, number[]>>();
+  for (const log of logs) {
+    const byDay = dosesByTracker.get(log.trackerId) ?? new Map<string, number[]>();
+    byDay.set(log.date, [...(byDay.get(log.date) ?? []), log.doseIndex]);
+    dosesByTracker.set(log.trackerId, byDay);
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-6 p-4 sm:p-6">
+      <AppHeader email={user.email} />
+
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Hoje</h1>
+          <p className="text-sm text-muted-foreground">{formatDayHeading(today)}</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+        {items.length > 0 && (
+          <Button asChild>
+            <Link href="/items/new">
+              <Plus data-icon="inline-start" />
+              Novo item
+            </Link>
+          </Button>
+        )}
+      </div>
+
+      {items.length === 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Nada para acompanhar ainda</CardTitle>
+            <CardDescription>
+              Crie um item para um remédio, vitamina ou hábito e marque as doses todos os dias.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <Link href="/items/new">
+                <Plus data-icon="inline-start" />
+                Criar primeiro item
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {items.map((tracker) => (
+            <TrackerCard
+              key={tracker.id}
+              tracker={tracker}
+              today={today}
+              dosesByDay={dosesByTracker.get(tracker.id) ?? new Map()}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          ))}
         </div>
-      </main>
-    </div>
+      )}
+    </main>
   );
 }

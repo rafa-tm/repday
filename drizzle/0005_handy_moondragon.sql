@@ -1,0 +1,1 @@
+ALTER TABLE "trackers" ADD COLUMN "goal_ml" integer;
