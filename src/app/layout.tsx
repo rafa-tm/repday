@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ServiceWorkerRegister } from "@/components/service-worker-register";
 import { TimeZoneSync } from "@/components/time-zone-sync";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -39,6 +40,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <TimeZoneSync />
         <ServiceWorkerRegister />
         {children}
+        <Toaster position="top-center" />
       </body>
     </html>
   );

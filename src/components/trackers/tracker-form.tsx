@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useState } from "react";
-import { Check, CircleAlert } from "lucide-react";
+import { Check, CircleAlert, Minus, Plus } from "lucide-react";
 import type { DoseUnit, Frequency, Tracker } from "@/db/schema";
 import type { TrackerFormState } from "@/app/items/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -24,6 +24,24 @@ import {
 } from "@/lib/trackers";
 
 type Action = (state: TrackerFormState, formData: FormData) => Promise<TrackerFormState>;
+
+/**
+ * Ajusta a lista de horários para `count` doses. Se a pessoa não mexeu nos horários sugeridos,
+ * redistribui tudo; senão mantém os dela e completa com sugestões que ainda não estão em uso.
+ */
+function nextDoseTimes(times: string[], count: number) {
+  if (times.join() === defaultDoseTimes(times.length).join()) return defaultDoseTimes(count);
+  if (count <= times.length) return times.slice(0, count);
+
+  const suggestions = defaultDoseTimes(count).filter((t) => !times.includes(t));
+  const next = [...times];
+  while (next.length < count) {
+    const [h, m] = next[next.length - 1].split(":").map(Number);
+    const anHourLater = `${String(Math.min(h + 1, 23)).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    next.push(suggestions.shift() ?? anHourLater);
+  }
+  return next.sort();
+}
 
 export function TrackerForm({
   action,
@@ -47,9 +65,28 @@ export function TrackerForm({
   const [intervalDays, setIntervalDays] = useState(String(tracker?.intervalDays && tracker.intervalDays > 1 ? tracker.intervalDays : 2));
   const [remindersEnabled, setRemindersEnabled] = useState(tracker?.remindersEnabled ?? false);
 
-  function changeDoseCount(value: string) {
-    const count = Math.min(Math.max(Number(value) || 1, 1), MAX_DOSES_PER_DAY);
-    if (count !== doseTimes.length) setDoseTimes(defaultDoseTimes(count));
+  // Texto livre enquanto a pessoa digita (pode ficar vazio); só vira número válido ao confirmar.
+  const [doseCountDraft, setDoseCountDraft] = useState(String(doseTimes.length));
+
+  function setDoseCount(value: number) {
+    const count = Math.min(Math.max(Math.round(value) || 1, 1), MAX_DOSES_PER_DAY);
+    setDoseCountDraft(String(count));
+    if (count === doseTimes.length) return;
+    setDoseTimes((times) => nextDoseTimes(times, count));
+  }
+
+  function changeDoseCountDraft(value: string) {
+    setDoseCountDraft(value);
+    // Aplica na hora só valores que não podem ser o começo de outro ("1" pode virar 10, 11 ou 12).
+    const count = Number(value);
+    if (count * 10 > MAX_DOSES_PER_DAY && count <= MAX_DOSES_PER_DAY) setDoseCount(count);
+  }
+
+  /** Confirma o que foi digitado; vazio ou inválido volta para o valor atual. */
+  function commitDoseCountDraft() {
+    const count = Number(doseCountDraft);
+    if (doseCountDraft === "" || count < 1) setDoseCountDraft(String(doseTimes.length));
+    else setDoseCount(count);
   }
 
   const isCustomColor = !TRACKER_COLORS.includes(color);
@@ -144,19 +181,6 @@ export function TrackerForm({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="dosesPerDay">Doses por dia</Label>
-              <Input
-                id="dosesPerDay"
-                name="dosesPerDay"
-                type="number"
-                min={1}
-                max={MAX_DOSES_PER_DAY}
-                value={doseTimes.length}
-                onChange={(e) => changeDoseCount(e.target.value)}
-                required
-              />
-            </div>
-            <div className="flex flex-col gap-2">
               <Label htmlFor="frequency">Repetição</Label>
               <Select name="frequency" value={frequency} onValueChange={(v) => setFrequency(v as Frequency)}>
                 <SelectTrigger id="frequency" className="w-full">
@@ -171,6 +195,7 @@ export function TrackerForm({
                 </SelectContent>
               </Select>
             </div>
+            
           </div>
 
           {frequency === "weekly" && (
@@ -218,6 +243,47 @@ export function TrackerForm({
           )}
 
           <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="dosesPerDay">Doses por dia</Label>
+              <input type="hidden" name="dosesPerDay" value={doseTimes.length} />
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-lg"
+                  aria-label="Menos uma dose"
+                  disabled={doseTimes.length <= 1}
+                  onClick={() => setDoseCount(doseTimes.length - 1)}
+                >
+                  <Minus />
+                </Button>
+                <Input
+                  id="dosesPerDay"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  className="h-9 w-14 text-center tabular-nums"
+                  value={doseCountDraft}
+                  onChange={(e) => changeDoseCountDraft(e.target.value.replace(/\D/g, ""))}
+                  onFocus={(e) => e.target.select()}
+                  onBlur={commitDoseCountDraft}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    commitDoseCountDraft();
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-lg"
+                  aria-label="Mais uma dose"
+                  disabled={doseTimes.length >= MAX_DOSES_PER_DAY}
+                  onClick={() => setDoseCount(doseTimes.length + 1)}
+                >
+                  <Plus />
+                </Button>
+              </div>
+            </div>
             <Label>{doseTimes.length > 1 ? "Horários das doses" : "Horário da dose"}</Label>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {doseTimes.map((time, i) => (
